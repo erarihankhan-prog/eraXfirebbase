@@ -56,7 +56,7 @@ from telegram.ext import (
 PANEL_URL = "https://eraxpanel.vercel.app/"
 # Edit this fallback URL when running without an environment file. The
 # FIREBASE_DATABASE_URL environment variable takes precedence in main().
-FIREBASE_DATABASE_URL = "https://your-project-default-rtdb.firebaseio.com"
+FIREBASE_DATABASE_URL = "https://bot-6b860-default-rtdb.firebaseio.com"
 FIREBASE_ONLY_API_FALLBACK = "ERA"
 FORCE_JOIN_CHANNELS = ("@eraXarmy", "@eraXearning")
 MAX_BULK_SIZE = 50
