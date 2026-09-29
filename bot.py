@@ -56,7 +56,7 @@ from telegram.ext import (
 PANEL_URL = "https://eraxpanel.vercel.app/"
 # Edit this fallback URL when running without an environment file. The
 # FIREBASE_DATABASE_URL environment variable takes precedence in main().
-FIREBASE_DATABASE_URL = "https://bot-6b860-default-rtdb.firebaseio.com"
+FIREBASE_DATABASE_URL = "https://your-project-default-rtdb.firebaseio.com"
 FIREBASE_ONLY_API_FALLBACK = "ERA"
 FORCE_JOIN_CHANNELS = ("@eraXarmy", "@eraXearning")
 MAX_BULK_SIZE = 50
@@ -2294,40 +2294,56 @@ class Bot:
         await self._main_menu(update.message)
 
     async def on_callback(self, update, context):
-        query = update.callback_query
-        data = query.data
-        await query.answer()
-        if data == 'check_join':
-            if await self._is_force_joined(update, context):
-                await self._main_menu(query.message)
-            else:
+        query = getattr(update, 'callback_query', None)
+        if query is None:
+            logger.warning('Callback router invoked without callback_query')
+            return
+        # Telegram callback data is user-controlled input from the bot's own
+        # keyboards. Normalize it so harmless whitespace/legacy payloads do
+        # not make every button appear unresponsive.
+        data = str(getattr(query, 'data', '') or '').strip()
+        try:
+            await query.answer()
+        except Exception as exc:
+            logger.warning('Callback answer failed for %r: %s', data, exc)
+        try:
+            if data == 'check_join':
+                if await self._is_force_joined(update, context):
+                    await self._main_menu(query.message)
+                else:
+                    await self._force_join_prompt(update, context)
+                return
+            if not await self._is_force_joined(update, context):
                 await self._force_join_prompt(update, context)
-            await self._delete_callback_message(query)
-            return
-        if not await self._is_force_joined(update, context):
-            await self._force_join_prompt(update, context)
-            await self._delete_callback_message(query)
-            return
-        if data == 'main_menu':
-            await self._main_menu(query.message)
-        elif data == 'scan_apk':
-            await self._safe_reply(query.message, '📎 Send an APK file now. Direct file upload is also detected automatically.')
-        elif data == 'bulk_scan':
-            await self._safe_reply(query.message, '📦 Send a ZIP containing APK files, or send APKs one after another.')
-        elif data == 'my_status':
-            await self.stats_cmd(update, context)
-        elif data == 'user_panels':
-            await self.panels_cmd(update, context)
-        elif data == 'firebase_keys':
-            # Kept only for backward-compatible old messages; never expose credentials to users.
-            await self.panels_cmd(update, context)
-        elif data.startswith('firebase_keys_page:'):
-            await self.keys_cmd(update, context, page=int(data.split(':', 1)[1]))
-        elif data == 'admin_panel':
-            await self.admin_cmd(update, context)
-        elif data.startswith('admin_'):
-            await self.admin_action(update, context, data)
-        await self._delete_callback_message(query)
+                return
+            if data == 'main_menu':
+                await self._main_menu(query.message)
+            elif data == 'scan_apk':
+                await self._safe_reply(query.message, '📎 Send an APK file now. Direct file upload is also detected automatically.')
+            elif data == 'bulk_scan':
+                await self._safe_reply(query.message, '📦 Send a ZIP containing APK files, or send APKs one after another.')
+            elif data == 'my_status':
+                await self.stats_cmd(update, context)
+            elif data == 'user_panels':
+                await self.panels_cmd(update, context)
+            elif data == 'firebase_keys':
+                # Kept only for backward-compatible old messages; never expose credentials to users.
+                await self.panels_cmd(update, context)
+            elif data.startswith('firebase_keys_page:'):
+                await self.keys_cmd(update, context, page=int(data.split(':', 1)[1]))
+            elif data == 'admin_panel':
+                await self.admin_cmd(update, context)
+            elif data.startswith('admin_'):
+                await self.admin_action(update, context, data)
+            else:
+                logger.warning('Unhandled Telegram callback_data=%r user=%s', data, getattr(update.effective_user, 'id', None))
+                await self._safe_reply(query.message, '⚠️ This button is outdated. Please press /start to open the current menu.')
+        except Exception:
+            logger.exception('Callback handler failed for callback_data=%r user=%s', data, getattr(update.effective_user, 'id', None))
+            try:
+                await self._safe_reply(query.message, '❌ This button could not be completed. Please press /start and try again.', replace_previous=False)
+            except Exception:
+                logger.exception('Could not send callback failure message for %r', data)
 
     async def help_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._safe_reply(update.message, 
@@ -2706,7 +2722,10 @@ class Bot:
 
         self.application.add_handler(CommandHandler("start", self.start_cmd))
         self.application.add_handler(CommandHandler("help", self.help_cmd))
-        self.application.add_handler(CallbackQueryHandler(self.on_callback, pattern='^(main_menu|check_join|scan_apk|bulk_scan|my_status|user_panels|firebase_keys|firebase_keys_page:[0-9]+|admin_panel|admin_users|admin_firebase|admin_firebase_page:[0-9]+|admin_scans|admin_duplicates|admin_broadcast|admin_ban_help|admin_maintenance|admin_toggle_bot|admin_manage_admins|open_db|open_panel)$'))
+        # Use a catch-all callback handler. The router validates and dispatches
+        # callback_data itself so old/new keyboards cannot be silently dropped
+        # by a stale regex allowlist before on_callback() runs.
+        self.application.add_handler(CallbackQueryHandler(self.on_callback))
         self.application.add_handler(CommandHandler("stats", self.stats_cmd))
         self.application.add_handler(CommandHandler("keys", self.keys_cmd))
         self.application.add_handler(CommandHandler("admin", self.admin_cmd))
